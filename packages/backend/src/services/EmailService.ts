@@ -136,6 +136,9 @@ export class EmailService {
   // Itinerary collaboration emails (pre-existing)
   // -------------------------------------------------------------------------
 
+  /**
+   * Send share invitation email with signed tokens and collaboration link
+   */
   async sendShareInvitation(
     recipientEmail: string,
     senderName: string,

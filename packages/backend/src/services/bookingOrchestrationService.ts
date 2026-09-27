@@ -13,6 +13,8 @@ import { withRetries } from "./retry";
 import { config } from "../config";
 import { BadRequestError, ConflictError } from "../utils/errors";
 import { FareRulesService, FareClass } from "./fareRulesService";
+import { emailService } from "./EmailService";
+import crypto from "crypto";
 import type {
   ChangeFeeQuote,
   CancellationRefund,
@@ -1136,6 +1138,64 @@ export class BookingOrchestrationService {
   async getGroupBooking(groupBookingId: string): Promise<GroupBooking | null> {
     const groupService = GroupBookingService.getInstance();
     return groupService.getGroupBooking(groupBookingId);
+  }
+
+  async shareItineraryViaEmail(
+    bookingId: string,
+    ownerEmail: string,
+    recipientEmail: string,
+    permissionLevel: string,
+    message?: string
+  ): Promise<{ token: string; invitationLink: string }> {
+    const booking = await this.bookingRepo.findOne({
+      where: { id: bookingId },
+      relations: ["flight", "passenger"],
+    });
+    if (!booking) {
+      throw new BadRequestError("Booking not found");
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const invitationLink = `${process.env.CLIENT_URL || "http://localhost:3000"}/dashboard/itinerary/${bookingId}?token=${token}`;
+    const itineraryTitle = `${booking.flight.fromAirport} to ${booking.flight.toAirport} (${booking.flight.flightNumber})`;
+
+    await emailService.sendShareInvitation(
+      recipientEmail,
+      ownerEmail,
+      itineraryTitle,
+      invitationLink,
+      permissionLevel,
+      message
+    );
+
+    logger.info("Itinerary shared via email", { bookingId, recipientEmail, permissionLevel });
+    return { token, invitationLink };
+  }
+
+  async notifyItineraryUpdate(
+    bookingId: string,
+    updaterName: string,
+    recipientEmail: string,
+    changes: Array<{ field: string; oldValue: any; newValue: any }>
+  ): Promise<boolean> {
+    const booking = await this.bookingRepo.findOne({
+      where: { id: bookingId },
+      relations: ["flight"],
+    });
+    if (!booking) {
+      throw new BadRequestError("Booking not found");
+    }
+
+    const itineraryTitle = `${booking.flight.fromAirport} to ${booking.flight.toAirport} (${booking.flight.flightNumber})`;
+    const itineraryLink = `${process.env.CLIENT_URL || "http://localhost:3000"}/dashboard/itinerary/${bookingId}`;
+
+    return emailService.sendItineraryUpdate(
+      recipientEmail,
+      updaterName,
+      itineraryTitle,
+      changes,
+      itineraryLink
+    );
   }
 }
 

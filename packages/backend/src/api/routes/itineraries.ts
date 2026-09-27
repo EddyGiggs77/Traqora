@@ -1,5 +1,6 @@
 /**
  * Itinerary Sharing & Collaboration Routes
+ * Provides sharing via email, token acceptance, OT-based editing, and access revocation.
  */
 
 import { Router, Request, Response } from "express";
