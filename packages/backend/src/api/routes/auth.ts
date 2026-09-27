@@ -228,3 +228,69 @@ authRoutes.delete('/biometric/credentials/:id', requireAuth, async (req: Request
         next(err);
     }
 });
+
+authRoutes.post('/2fa/setup', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const walletAddress = req.user?.walletAddress;
+        if (!walletAddress) {
+            throw new UnauthorizedError();
+        }
+        const authService = getAuthService();
+        const result = await authService.generateTotpSecret(walletAddress);
+        res.json(result);
+    } catch (err: any) {
+        next(err);
+    }
+});
+
+authRoutes.post('/2fa/verify-setup', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const walletAddress = req.user?.walletAddress;
+        if (!walletAddress) {
+            throw new UnauthorizedError();
+        }
+        const { token } = req.body;
+        if (!token) {
+            throw new BadRequestError('TOTP token is required');
+        }
+        const authService = getAuthService();
+        const result = await authService.verifyAndEnableTotp(walletAddress, token);
+        res.json(result);
+    } catch (err: any) {
+        next(new UnauthorizedError(err.message));
+    }
+});
+
+authRoutes.post('/2fa/verify', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { walletAddress, token } = req.body;
+        if (!walletAddress || !token) {
+            throw new BadRequestError('Wallet address and TOTP token are required');
+        }
+        const authService = getAuthService();
+        const isValid = await authService.verifyTotp(walletAddress, token);
+        if (!isValid) {
+            throw new UnauthorizedError('Invalid TOTP token');
+        }
+        res.json({ success: true });
+    } catch (err: any) {
+        next(new UnauthorizedError(err.message));
+    }
+});
+
+authRoutes.post('/2fa/backup', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { walletAddress, code } = req.body;
+        if (!walletAddress || !code) {
+            throw new BadRequestError('Wallet address and backup code are required');
+        }
+        const authService = getAuthService();
+        const isValid = await authService.verifyBackupCode(walletAddress, code);
+        if (!isValid) {
+            throw new UnauthorizedError('Invalid or already used backup code');
+        }
+        res.json({ success: true });
+    } catch (err: any) {
+        next(new UnauthorizedError(err.message));
+    }
+});

@@ -120,6 +120,10 @@ export class AuthService {
   private static readonly BIOMETRIC_AUTHORIZE_PAYMENT = '/api/v1/auth/biometric/authorize-payment'
   private static readonly BIOMETRIC_FALLBACK_BEGIN = '/api/v1/auth/biometric/authenticate/fallback/begin'
   private static readonly BIOMETRIC_FALLBACK_COMPLETE = '/api/v1/auth/biometric/authenticate/fallback/complete'
+  private static readonly TOTP_SETUP = '/api/v1/auth/2fa/setup'
+  private static readonly TOTP_VERIFY_SETUP = '/api/v1/auth/2fa/verify-setup'
+  private static readonly TOTP_VERIFY = '/api/v1/auth/2fa/verify'
+  private static readonly TOTP_BACKUP = '/api/v1/auth/2fa/backup'
 
   static async getChallenge(walletAddress: string): Promise<AuthChallenge> {
     const response = await api.post(this.CHALLENGE_ENDPOINT, {
@@ -529,6 +533,83 @@ export class AuthService {
     }
 
     return completeResponse.json()
+  }
+
+  static async setup2fa(): Promise<{ secret: string; qrCodeUrl: string; backupCodes: string[] }> {
+    const authToken = getAccessToken()
+    if (!authToken) {
+      throw new Error('Not authenticated')
+    }
+
+    const response = await fetch(`${API_BASE_URL}${this.TOTP_SETUP}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+    })
+
+    if (!response.ok) {
+      const err = await response.json()
+      throw new Error(err.error?.message || 'Failed to initiate 2FA setup')
+    }
+
+    return response.json()
+  }
+
+  static async verifyAndEnable2fa(token: string): Promise<{ success: boolean; backupCodes: string[] }> {
+    const authToken = getAccessToken()
+    if (!authToken) {
+      throw new Error('Not authenticated')
+    }
+
+    const response = await fetch(`${API_BASE_URL}${this.TOTP_VERIFY_SETUP}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ token }),
+    })
+
+    if (!response.ok) {
+      const err = await response.json()
+      throw new Error(err.error?.message || 'Failed to verify and enable 2FA')
+    }
+
+    return response.json()
+  }
+
+  static async verify2fa(walletAddress: string, token: string): Promise<boolean> {
+    const response = await fetch(`${API_BASE_URL}${this.TOTP_VERIFY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress, token }),
+    })
+
+    if (!response.ok) {
+      const err = await response.json()
+      throw new Error(err.error?.message || 'Invalid 2FA token')
+    }
+
+    const data = await response.json()
+    return data.success
+  }
+
+  static async verifyBackupCode(walletAddress: string, code: string): Promise<boolean> {
+    const response = await fetch(`${API_BASE_URL}${this.TOTP_BACKUP}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress, code }),
+    })
+
+    if (!response.ok) {
+      const err = await response.json()
+      throw new Error(err.error?.message || 'Invalid or expired backup code')
+    }
+
+    const data = await response.json()
+    return data.success
   }
 }
 

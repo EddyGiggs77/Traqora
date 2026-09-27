@@ -6,6 +6,8 @@ import { User } from '../db/entities/User';
 import { BiometricCredential } from '../db/entities/BiometricCredential';
 import { WalletAuthFactory } from './WalletSignatureAdapter';
 import { config } from '../config';
+import { authenticator } from 'otplib';
+import QRCode from 'qrcode';
 
 interface ChallengeResponse {
     nonce: string;
@@ -818,5 +820,73 @@ export class AuthService {
     // Exposed for testing
     async disconnect(): Promise<void> {
         await this.redis.quit();
+    }
+
+    async generateTotpSecret(walletAddress: string): Promise<{ secret: string; qrCodeUrl: string; backupCodes: string[] }> {
+        const user = await this.userRepository.findOne({ where: { walletAddress } });
+        if (!user) {
+            throw new Error('User not found');
+        }
+
+        const secret = authenticator.generateSecret();
+        const otpauth = authenticator.keyuri(walletAddress, 'Traqora', secret);
+        const qrCodeUrl = await QRCode.toDataURL(otpauth);
+
+        const backupCodes = Array.from({ length: 8 }, () => crypto.randomBytes(4).toString('hex'));
+
+        await this.redis.set(
+            `auth:totp:pending:${walletAddress}`,
+            JSON.stringify({ secret, backupCodes }),
+            'EX',
+            600
+        );
+
+        return { secret, qrCodeUrl, backupCodes };
+    }
+
+    async verifyAndEnableTotp(walletAddress: string, token: string): Promise<{ success: boolean; backupCodes: string[] }> {
+        const pendingRaw = await this.redis.get(`auth:totp:pending:${walletAddress}`);
+        if (!pendingRaw) {
+            throw new Error('Pending TOTP setup session not found or expired');
+        }
+
+        const { secret, backupCodes } = JSON.parse(pendingRaw);
+        const isValid = authenticator.verify({ token, secret });
+
+        if (!isValid) {
+            throw new Error('Invalid TOTP token');
+        }
+
+        await this.redis.set(`auth:totp:secret:${walletAddress}`, secret);
+        await this.redis.set(`auth:totp:backup:${walletAddress}`, JSON.stringify(backupCodes));
+        await this.redis.del(`auth:totp:pending:${walletAddress}`);
+
+        return { success: true, backupCodes };
+    }
+
+    async verifyTotp(walletAddress: string, token: string): Promise<boolean> {
+        const secret = await this.redis.get(`auth:totp:secret:${walletAddress}`);
+        if (!secret) {
+            throw new Error('TOTP is not enabled for this user');
+        }
+
+        return authenticator.verify({ token, secret });
+    }
+
+    async verifyBackupCode(walletAddress: string, code: string): Promise<boolean> {
+        const backupCodesRaw = await this.redis.get(`auth:totp:backup:${walletAddress}`);
+        if (!backupCodesRaw) {
+            return false;
+        }
+
+        const backupCodes: string[] = JSON.parse(backupCodesRaw);
+        const index = backupCodes.indexOf(code);
+        if (index === -1) {
+            return false;
+        }
+
+        backupCodes.splice(index, 1);
+        await this.redis.set(`auth:totp:backup:${walletAddress}`, JSON.stringify(backupCodes));
+        return true;
     }
 }
