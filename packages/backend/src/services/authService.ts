@@ -110,6 +110,130 @@ function base64urlToBuffer(str: string): Buffer {
 }
 
 export class AuthService {
+    private auditLog(action: string, walletAddress: string, details?: any): void {
+        console.log(`[AUDIT] ${new Date().toISOString()} | Action: ${action} | Wallet: ${walletAddress}`, details ? JSON.stringify(details) : '');
+    }
+
+    async setupTotp(walletAddress: string): Promise<{ secret: string; qrCodeUrl: string; backupCodes: string[] }> {
+        const user = await this.userRepository.findOne({ where: { walletAddress } });
+        if (!user) throw new Error('User not found');
+
+        const secret = authenticator.generateSecret();
+        const appName = 'Traqora';
+        const otpauth = authenticator.keyuri(walletAddress, appName, secret);
+        const qrCodeUrl = await QRCode.toDataURL(otpauth);
+
+        const backupCodes = Array.from({ length: 8 }, () => crypto.randomBytes(4).toString('hex').toUpperCase());
+
+        await this.redis.set(`auth:2fa:setup:${walletAddress}`, JSON.stringify({ secret, backupCodes }), 'EX', 600);
+        this.auditLog('2FA_SETUP_INITIATED', walletAddress);
+
+        return { secret, qrCodeUrl, backupCodes };
+    }
+
+    async verifyAndEnableTotp(walletAddress: string, token: string): Promise<{ success: boolean; backupCodes: string[] }> {
+        const raw = await this.redis.get(`auth:2fa:setup:${walletAddress}`);
+        if (!raw) throw new Error('2FA setup session expired or not found');
+
+        const { secret, backupCodes } = JSON.parse(raw);
+        const isValid = authenticator.verify({ token, secret });
+        if (!isValid) throw new Error('Invalid TOTP token');
+
+        let user = await this.userRepository.findOne({ where: { walletAddress } });
+        if (!user) throw new Error('User not found');
+
+        user.is2faEnabled = true;
+        user.totpSecret = secret;
+        user.backupCodes = JSON.stringify(backupCodes);
+        await this.userRepository.save(user);
+
+        await this.redis.del(`auth:2fa:setup:${walletAddress}`);
+        this.auditLog('2FA_ENABLED', walletAddress);
+
+        return { success: true, backupCodes };
+    }
+
+    async verifyTotpToken(walletAddress: string, token: string, rememberDevice: boolean = false): Promise<{ success: boolean; rememberToken?: string }> {
+        let user = await this.userRepository.findOne({ where: { walletAddress } });
+        if (!user || !user.is2faEnabled || !user.totpSecret) {
+            throw new Error('2FA is not enabled for this user');
+        }
+
+        const isValid = authenticator.verify({ token, secret: user.totpSecret });
+        if (!isValid) {
+            this.auditLog('2FA_VERIFY_FAILED', walletAddress);
+            throw new Error('Invalid TOTP token');
+        }
+
+        this.auditLog('2FA_VERIFY_SUCCESS', walletAddress);
+
+        let rememberToken: string | undefined;
+        if (rememberDevice) {
+            rememberToken = crypto.randomBytes(32).toString('hex');
+            await this.redis.set(`auth:2fa:remember:${walletAddress}:${rememberToken}`, '1', 'EX', 30 * 24 * 60 * 60);
+        }
+
+        return { success: true, rememberToken };
+    }
+
+    async verifyBackupCode(walletAddress: string, code: string): Promise<{ success: boolean }> {
+        let user = await this.userRepository.findOne({ where: { walletAddress } });
+        if (!user || !user.is2faEnabled || !user.backupCodes) {
+            throw new Error('2FA or backup codes not configured');
+        }
+
+        const codes: string[] = JSON.parse(user.backupCodes);
+        const codeIndex = codes.indexOf(code.trim().toUpperCase());
+        if (codeIndex === -1) {
+            this.auditLog('2FA_BACKUP_FAILED', walletAddress);
+            throw new Error('Invalid or expired backup code');
+        }
+
+        codes.splice(codeIndex, 1);
+        user.backupCodes = JSON.stringify(codes);
+        await this.userRepository.save(user);
+
+        this.auditLog('2FA_BACKUP_SUCCESS', walletAddress);
+        return { success: true };
+    }
+
+    async adminSet2faEnforcement(walletAddress: string, enforced: boolean): Promise<void> {
+        let user = await this.userRepository.findOne({ where: { walletAddress } });
+        if (!user) throw new Error('User not found');
+
+        user.is2faEnforced = enforced;
+        await this.userRepository.save(user);
+        this.auditLog('ADMIN_2FA_ENFORCEMENT_CHANGED', walletAddress, { enforced });
+    }
+
+    async checkSensitiveAction2fa(walletAddress: string, token?: string, backupCode?: string, rememberToken?: string): Promise<boolean> {
+        let user = await this.userRepository.findOne({ where: { walletAddress } });
+        if (!user) throw new Error('User not found');
+
+        if (user.is2faEnforced || user.is2faEnabled) {
+            if (rememberToken) {
+                const remembered = await this.redis.get(`auth:2fa:remember:${walletAddress}:${rememberToken}`);
+                if (remembered) return true;
+            }
+            if (token) {
+                const res = await this.verifyTotpToken(walletAddress, token);
+                return res.success;
+            }
+            if (backupCode) {
+                const res = await this.verifyBackupCode(walletAddress, backupCode);
+                return res.success;
+            }
+            throw new Error('2FA verification required for sensitive action');
+        }
+        return true;
+    }
+
+    async checkDeviceRemembered(walletAddress: string, rememberToken: string): Promise<boolean> {
+        const remembered = await this.redis.get(`auth:2fa:remember:${walletAddress}:${rememberToken}`);
+        return !!remembered;
+    }
+
+
     private redis: Redis;
     private userRepository: Repository<User>;
     private biometricRepository: Repository<BiometricCredential>;
@@ -820,73 +944,5 @@ export class AuthService {
     // Exposed for testing
     async disconnect(): Promise<void> {
         await this.redis.quit();
-    }
-
-    async generateTotpSecret(walletAddress: string): Promise<{ secret: string; qrCodeUrl: string; backupCodes: string[] }> {
-        const user = await this.userRepository.findOne({ where: { walletAddress } });
-        if (!user) {
-            throw new Error('User not found');
-        }
-
-        const secret = authenticator.generateSecret();
-        const otpauth = authenticator.keyuri(walletAddress, 'Traqora', secret);
-        const qrCodeUrl = await QRCode.toDataURL(otpauth);
-
-        const backupCodes = Array.from({ length: 8 }, () => crypto.randomBytes(4).toString('hex'));
-
-        await this.redis.set(
-            `auth:totp:pending:${walletAddress}`,
-            JSON.stringify({ secret, backupCodes }),
-            'EX',
-            600
-        );
-
-        return { secret, qrCodeUrl, backupCodes };
-    }
-
-    async verifyAndEnableTotp(walletAddress: string, token: string): Promise<{ success: boolean; backupCodes: string[] }> {
-        const pendingRaw = await this.redis.get(`auth:totp:pending:${walletAddress}`);
-        if (!pendingRaw) {
-            throw new Error('Pending TOTP setup session not found or expired');
-        }
-
-        const { secret, backupCodes } = JSON.parse(pendingRaw);
-        const isValid = authenticator.verify({ token, secret });
-
-        if (!isValid) {
-            throw new Error('Invalid TOTP token');
-        }
-
-        await this.redis.set(`auth:totp:secret:${walletAddress}`, secret);
-        await this.redis.set(`auth:totp:backup:${walletAddress}`, JSON.stringify(backupCodes));
-        await this.redis.del(`auth:totp:pending:${walletAddress}`);
-
-        return { success: true, backupCodes };
-    }
-
-    async verifyTotp(walletAddress: string, token: string): Promise<boolean> {
-        const secret = await this.redis.get(`auth:totp:secret:${walletAddress}`);
-        if (!secret) {
-            throw new Error('TOTP is not enabled for this user');
-        }
-
-        return authenticator.verify({ token, secret });
-    }
-
-    async verifyBackupCode(walletAddress: string, code: string): Promise<boolean> {
-        const backupCodesRaw = await this.redis.get(`auth:totp:backup:${walletAddress}`);
-        if (!backupCodesRaw) {
-            return false;
-        }
-
-        const backupCodes: string[] = JSON.parse(backupCodesRaw);
-        const index = backupCodes.indexOf(code);
-        if (index === -1) {
-            return false;
-        }
-
-        backupCodes.splice(index, 1);
-        await this.redis.set(`auth:totp:backup:${walletAddress}`, JSON.stringify(backupCodes));
-        return true;
     }
 }

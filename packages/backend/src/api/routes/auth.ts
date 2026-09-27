@@ -232,11 +232,9 @@ authRoutes.delete('/biometric/credentials/:id', requireAuth, async (req: Request
 authRoutes.post('/2fa/setup', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
     try {
         const walletAddress = req.user?.walletAddress;
-        if (!walletAddress) {
-            throw new UnauthorizedError();
-        }
+        if (!walletAddress) throw new UnauthorizedError();
         const authService = getAuthService();
-        const result = await authService.generateTotpSecret(walletAddress);
+        const result = await authService.setupTotp(walletAddress);
         res.json(result);
     } catch (err: any) {
         next(err);
@@ -246,33 +244,24 @@ authRoutes.post('/2fa/setup', requireAuth, async (req: Request, res: Response, n
 authRoutes.post('/2fa/verify-setup', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
     try {
         const walletAddress = req.user?.walletAddress;
-        if (!walletAddress) {
-            throw new UnauthorizedError();
-        }
+        if (!walletAddress) throw new UnauthorizedError();
         const { token } = req.body;
-        if (!token) {
-            throw new BadRequestError('TOTP token is required');
-        }
+        if (!token) throw new BadRequestError('Token is required');
         const authService = getAuthService();
         const result = await authService.verifyAndEnableTotp(walletAddress, token);
         res.json(result);
     } catch (err: any) {
-        next(new UnauthorizedError(err.message));
+        next(err);
     }
 });
 
 authRoutes.post('/2fa/verify', async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { walletAddress, token } = req.body;
-        if (!walletAddress || !token) {
-            throw new BadRequestError('Wallet address and TOTP token are required');
-        }
+        const { walletAddress, token, rememberDevice } = req.body;
+        if (!walletAddress || !token) throw new BadRequestError('Wallet address and token are required');
         const authService = getAuthService();
-        const isValid = await authService.verifyTotp(walletAddress, token);
-        if (!isValid) {
-            throw new UnauthorizedError('Invalid TOTP token');
-        }
-        res.json({ success: true });
+        const result = await authService.verifyTotpToken(walletAddress, token, rememberDevice);
+        res.json(result);
     } catch (err: any) {
         next(new UnauthorizedError(err.message));
     }
@@ -281,16 +270,26 @@ authRoutes.post('/2fa/verify', async (req: Request, res: Response, next: NextFun
 authRoutes.post('/2fa/backup', async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { walletAddress, code } = req.body;
-        if (!walletAddress || !code) {
-            throw new BadRequestError('Wallet address and backup code are required');
-        }
+        if (!walletAddress || !code) throw new BadRequestError('Wallet address and backup code are required');
         const authService = getAuthService();
-        const isValid = await authService.verifyBackupCode(walletAddress, code);
-        if (!isValid) {
-            throw new UnauthorizedError('Invalid or already used backup code');
-        }
-        res.json({ success: true });
+        const result = await authService.verifyBackupCode(walletAddress, code);
+        res.json(result);
     } catch (err: any) {
         next(new UnauthorizedError(err.message));
     }
 });
+
+authRoutes.post('/2fa/enforce', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const walletAddress = req.user?.walletAddress;
+        if (!walletAddress) throw new UnauthorizedError();
+        const { targetWallet, enforced } = req.body;
+        const authService = getAuthService();
+        await authService.adminSet2faEnforcement(targetWallet || walletAddress, enforced);
+        res.json({ success: true });
+    } catch (err: any) {
+        next(err);
+    }
+});
+
+
