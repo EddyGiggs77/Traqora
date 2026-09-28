@@ -1137,6 +1137,32 @@ export class BookingOrchestrationService {
     const groupService = GroupBookingService.getInstance();
     return groupService.getGroupBooking(groupBookingId);
   }
+
+  async calculateTotalWithServices(bookingId: string): Promise<any> {
+    const booking = await this.bookingRepo.findOne({
+      where: { id: bookingId },
+      relations: ["flight"],
+    });
+    if (!booking) {
+      throw new BadRequestError("Booking not found");
+    }
+    const inflightSvc = (await import("./inflightServicesService")).inflightServicesService;
+    const services = await inflightSvc.getBookingServices(bookingId);
+    const pricing = inflightSvc.calculateServicePricing(services);
+    const baseAmountCents = booking.amountCents;
+    const totalWithServicesCents = baseAmountCents + pricing.totalCents;
+    return {
+      bookingId,
+      baseAmountCents,
+      servicesTotalCents: pricing.totalCents,
+      totalWithServicesCents,
+      currency: pricing.currency || "USD",
+      breakdown: [
+        { label: "Base Flight Fare", amountCents: baseAmountCents },
+        ...pricing.breakdown,
+      ],
+    };
+  }
 }
 
 function isBookingEditable(status: string): boolean {

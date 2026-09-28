@@ -284,7 +284,7 @@ const entertainmentSchema = z.object({
 router.get(
   "/catalog",
   asyncHandler(async (req: Request, res: Response) => {
-    const { cabinClass } = req.query;
+    const { cabinClass, dietary } = req.query;
 
     if (!cabinClass) {
       return res
@@ -294,6 +294,7 @@ router.get(
 
     const catalog = await inflightServicesService.getServicesCatalog(
       cabinClass as any,
+      (dietary as string) || undefined,
     );
 
     return res.json(catalog);
