@@ -322,13 +322,18 @@ export class BookingOrchestrationService {
         token: config.contracts.token,
       });
 
+      const inflightServices = (params as any).inflightServices || [];
+      const seatSelectionPrice = (params as any).seatSelectionPrice || 0;
+      const servicePricing = inflightServicesService ? inflightServicesService.calculateServicePricing(inflightServices) : { totalCents: 0 };
+      const totalAmountCents = flight.priceCents + seatSelectionPrice + servicePricing.totalCents;
+
       const booking = this.bookingRepo.create({
         idempotencyKey: params.idempotencyKey,
         walletAddress: params.walletAddress ?? null,
         flight,
         passenger,
         status: "onchain_submitted",
-        amountCents: flight.priceCents,
+        amountCents: totalAmountCents,
         sorobanTxHash: result.txHash,
       });
 

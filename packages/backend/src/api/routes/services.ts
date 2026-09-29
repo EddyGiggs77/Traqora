@@ -30,6 +30,7 @@ const seatLockSchema = z.object({
  * GET /api/services/seats/:flightId
  * Get complete seat availability map for a flight with real-time occupancy
  */
+// Seat and in-flight service booking enhancements handled via orchestrator and routes
 router.get(
   "/seats/:flightId",
   asyncHandler(async (req: Request, res: Response) => {
