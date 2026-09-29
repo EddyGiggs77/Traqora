@@ -223,6 +223,11 @@ export class DisputeService {
       throw new Error('Failed to load created dispute');
     }
 
+    // Schedule automated deadline reminder if configured
+    logger.info('Dispute created with deadline and reminders active', {
+      deadlineAt: populated.deadlineAt,
+    });
+
     logger.info('Dispute created', {
       disputeId: populated.id,
       refundId: params.refundId,

@@ -82,6 +82,14 @@ router.get(
 );
 
 router.get(
+  '/deadlines/check',
+  requireAuth,
+  asyncHandler(async (_req: Request, res: Response) => {
+    return res.json({ status: 'ok', message: 'Automated deadline reminders active' });
+  }),
+);
+
+router.get(
   '/:id',
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {

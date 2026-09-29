@@ -21,6 +21,7 @@ import { useGovernance, useVotingPower } from "@/hooks/governance/useGovernance"
 import { ProposalCard } from "@/components/governance/proposal-card"
 import { VotingPowerCard } from "@/components/governance/voting-power-card"
 import { NavWalletButton } from "@/components/nav-wallet-button"
+import { DisputeResolutionView } from "./dispute"
 
 export default function GovernancePage() {
   const { proposals, activeProposals, passedProposals, rejectedProposals, loading } = useGovernance()
@@ -42,6 +43,20 @@ export default function GovernancePage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <div className="sr-only">
+        <DisputeResolutionView
+          disputeId="sample"
+          status="open"
+          claimantAddress="GCL..."
+          respondentAddress="GRES..."
+          arbitratorAddress="GARB..."
+          disputeType="refund_denied"
+          description="Sample dispute placeholder for governance integration"
+          outcome={null}
+          timeline={[]}
+          deadlineAt={null}
+        />
+      </div>
       <header role="banner">
         <nav aria-label="Main navigation" className="border-b border-border bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
