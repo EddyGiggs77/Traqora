@@ -9,6 +9,7 @@ import { seatAvailabilityService } from "../../services/seatAvailabilityService"
 import { inflightServicesService } from "../../services/inflightServicesService";
 
 const router = Router();
+// services route registered
 
 // ── Seat Selection ────────────────────────────────────────────────────────────
 

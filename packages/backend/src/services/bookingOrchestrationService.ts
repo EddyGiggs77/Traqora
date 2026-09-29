@@ -1133,9 +1133,27 @@ export class BookingOrchestrationService {
     return groupService.checkInAllMembers(groupBookingId, seatAllocations);
   }
 
-  async getGroupBooking(groupBookingId: string): Promise<GroupBooking | null> {
+  async getBooking(groupBookingId: string): Promise<GroupBooking | null> {
     const groupService = GroupBookingService.getInstance();
     return groupService.getGroupBooking(groupBookingId);
+  }
+
+  async calculateTotalWithServices(bookingId: string): Promise<{ baseAmountCents: number; servicesAmountCents: number; totalCents: number; currency: string }> {
+    const booking = await this.bookingRepo.findOne({
+      where: { id: bookingId },
+    });
+    if (!booking) {
+      throw new BadRequestError("Booking not found");
+    }
+    const services = await inflightServicesService.getBookingServices(bookingId);
+    const pricing = inflightServicesService.calculateServicePricing(services);
+    const totalCents = booking.amountCents + pricing.totalCents;
+    return {
+      baseAmountCents: booking.amountCents,
+      servicesAmountCents: pricing.totalCents,
+      totalCents,
+      currency: pricing.currency,
+    };
   }
 }
 
