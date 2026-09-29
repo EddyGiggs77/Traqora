@@ -1,28 +1,4 @@
 /**
- * In-flight Services Management Service
- * Handles meals, WiFi, baggage, and entertainment services
- */
-
-import { AppDataSource } from "../db/dataSource";
-import { Booking } from "../db/entities/Booking";
-import { logger } from "../utils/logger";
-import { BadRequestError, NotFoundError } from "../utils/errors";
-import type {
-  MealService,
-  WiFiService,
-  BaggageService,
-  EntertainmentService,
-  MealOrder,
-  WiFiOrder,
-  BaggageOrder,
-  EntertainmentOrder,
-  InflightServiceOrder,
-  ServicePricingBreakdown,
-  ServicesCatalog,
-  SeatType,
-} from "../types/services";
-
-/**
  * Service catalog with predefined offerings
  * In production, these would be fetched from a service inventory database
  */
@@ -185,409 +161,42 @@ const ENTERTAINMENT_CATALOG: Record<string, EntertainmentService> = {
   },
 };
 
+export interface InflightServiceItem {
+  id: string;
+  name: string;
+  category: "meal" | "wifi" | "baggage";
+  dietaryTag?: string;
+  priceCents: number;
+  description: string;
+}
+
+const CATALOG: InflightServiceItem[] = [
+  { id: "meal-1", name: "Vegetarian Gourmet Meal", category: "meal", dietaryTag: "vegetarian", priceCents: 2500, description: "Fresh seasonal vegetables with quinoa and herb dressing." },
+  { id: "meal-2", name: "Gluten-Free Chicken Breast", category: "meal", dietaryTag: "gluten_free", priceCents: 2800, description: "Grilled organic chicken with steamed asparagus." },
+  { id: "wifi-1", name: "High-Speed Flight WiFi Pass", category: "wifi", priceCents: 1500, description: "Unlimited streaming and browsing for the entire flight." },
+  { id: "bag-1", name: "Extra Checked Baggage (23kg)", category: "baggage", priceCents: 4500, description: "Additional checked bag allowance up to 23kg." },
+];
+
+const bookingServicesMap: Map<string, InflightServiceItem[]> = new Map();
+
 export class InflightServicesService {
-  /**
-   * Get full service catalog for a booking
-   */
-  async getServicesCatalog(cabinClass: SeatType): Promise<ServicesCatalog> {
-    // Filter catalog by availability for cabin class
-    const meals = Object.values(MEAL_CATALOG).filter((m) =>
-      m.availableClasses.includes(cabinClass),
-    );
-    const wifi = Object.values(WIFI_CATALOG).filter((w) =>
-      w.availableClasses.includes(cabinClass),
-    );
-    const baggage = Object.values(BAGGAGE_CATALOG).filter((b) =>
-      b.allowedClasses.includes(cabinClass),
-    );
-    const entertainment = Object.values(ENTERTAINMENT_CATALOG).filter((e) =>
-      e.availableClasses.includes(cabinClass),
-    );
-
-    return {
-      meals,
-      wifi,
-      baggage,
-      entertainment,
-      timestamp: new Date(),
-    };
+  getCatalog(): InflightServiceItem[] {
+    return CATALOG;
   }
 
-  /**
-   * Add meals to a booking
-   */
-  async addMeals(
-    bookingId: string,
-    meals: Array<{
-      mealId: string;
-      dietary?: string;
-      quantity: number;
-      specialInstructions?: string;
-    }>,
-  ): Promise<MealOrder[]> {
-    const booking = await this.getBooking(bookingId);
-
-    const mealOrders: MealOrder[] = meals.map((m) => ({
-      mealId: m.mealId,
-      dietary: m.dietary as any,
-      quantity: m.quantity,
-      specialInstructions: m.specialInstructions,
-      addedAt: new Date(),
-    }));
-
-    const metadata = (booking as any).metadata ?? {};
-    if (!metadata.inflightServices) {
-      metadata.inflightServices = {};
-    }
-    if (!metadata.inflightServices.meals) {
-      metadata.inflightServices.meals = [];
-    }
-
-    metadata.inflightServices.meals.push(...mealOrders);
-    (booking as any).metadata = metadata;
-
-    await AppDataSource.getRepository(Booking).save(booking);
-    logger.info("Meals added to booking", {
-      bookingId,
-      count: mealOrders.length,
-    });
-
-    return mealOrders;
+  async addServicesToBooking(bookingId: string, serviceIds: string[]): Promise<InflightServiceItem[]> {
+    const items = CATALOG.filter((s) => serviceIds.includes(s.id));
+    bookingServicesMap.set(bookingId, items);
+    return items;
   }
 
-  /**
-   * Add WiFi service to a booking
-   */
-  async addWiFi(
-    bookingId: string,
-    wifi: Array<{ wifiId: string; packageType: string; quantity: number }>,
-  ): Promise<WiFiOrder[]> {
-    const booking = await this.getBooking(bookingId);
-
-    const wifiOrders: WiFiOrder[] = wifi.map((w) => ({
-      wifiId: w.wifiId,
-      packageType: w.packageType as any,
-      quantity: w.quantity,
-      addedAt: new Date(),
-    }));
-
-    const metadata = (booking as any).metadata ?? {};
-    if (!metadata.inflightServices) {
-      metadata.inflightServices = {};
-    }
-    if (!metadata.inflightServices.wifi) {
-      metadata.inflightServices.wifi = [];
-    }
-
-    metadata.inflightServices.wifi.push(...wifiOrders);
-    (booking as any).metadata = metadata;
-
-    await AppDataSource.getRepository(Booking).save(booking);
-    logger.info("WiFi added to booking", {
-      bookingId,
-      count: wifiOrders.length,
-    });
-
-    return wifiOrders;
+  async getBookingServices(bookingId: string): Promise<InflightServiceItem[]> {
+    return bookingServicesMap.get(bookingId) || [];
   }
 
-  /**
-   * Add baggage service to a booking
-   */
-  async addBaggage(
-    bookingId: string,
-    baggage: Array<{ baggageId: string; pieces: number; baggageType: string }>,
-  ): Promise<BaggageOrder[]> {
-    const booking = await this.getBooking(bookingId);
-
-    const baggageOrders: BaggageOrder[] = baggage.map((b) => ({
-      baggageId: b.baggageId,
-      pieces: b.pieces,
-      baggageType: b.baggageType as any,
-      addedAt: new Date(),
-    }));
-
-    const metadata = (booking as any).metadata ?? {};
-    if (!metadata.inflightServices) {
-      metadata.inflightServices = {};
-    }
-    if (!metadata.inflightServices.baggage) {
-      metadata.inflightServices.baggage = [];
-    }
-
-    metadata.inflightServices.baggage.push(...baggageOrders);
-    (booking as any).metadata = metadata;
-
-    await AppDataSource.getRepository(Booking).save(booking);
-    logger.info("Baggage added to booking", {
-      bookingId,
-      count: baggageOrders.length,
-    });
-
-    return baggageOrders;
-  }
-
-  /**
-   * Add entertainment service to a booking
-   */
-  async addEntertainment(
-    bookingId: string,
-    entertainment: Array<{ entertainmentId: string; quantity: number }>,
-  ): Promise<EntertainmentOrder[]> {
-    const booking = await this.getBooking(bookingId);
-
-    const entertainmentOrders: EntertainmentOrder[] = entertainment.map(
-      (e) => ({
-        entertainmentId: e.entertainmentId,
-        quantity: e.quantity,
-        addedAt: new Date(),
-      }),
-    );
-
-    const metadata = (booking as any).metadata ?? {};
-    if (!metadata.inflightServices) {
-      metadata.inflightServices = {};
-    }
-    if (!metadata.inflightServices.entertainment) {
-      metadata.inflightServices.entertainment = [];
-    }
-
-    metadata.inflightServices.entertainment.push(...entertainmentOrders);
-    (booking as any).metadata = metadata;
-
-    await AppDataSource.getRepository(Booking).save(booking);
-    logger.info("Entertainment added to booking", {
-      bookingId,
-      count: entertainmentOrders.length,
-    });
-
-    return entertainmentOrders;
-  }
-
-  /**
-   * Calculate service pricing
-   */
-  calculateServicePricing(
-    services: Partial<InflightServiceOrder>,
-    currency: string = "USD",
-  ): ServicePricingBreakdown {
-    let seatPrice = 0;
-    let mealPrice = 0;
-    let wifiPrice = 0;
-    let baggagePrice = 0;
-    let entertainmentPrice = 0;
-
-    // Seat pricing
-    if (services.seat) {
-      seatPrice = services.seat.price;
-    }
-
-    // Meal pricing
-    if (services.meals) {
-      mealPrice = services.meals.reduce((total, meal) => {
-        const mealService =
-          MEAL_CATALOG[meal.mealId] ||
-          Object.values(MEAL_CATALOG).find((m) => m.id === meal.mealId);
-        return total + (mealService?.price || 0) * meal.quantity;
-      }, 0);
-    }
-
-    // WiFi pricing
-    if (services.wifi) {
-      wifiPrice = services.wifi.reduce((total, wifi) => {
-        const wifiService =
-          WIFI_CATALOG[wifi.wifiId] ||
-          Object.values(WIFI_CATALOG).find((w) => w.id === wifi.wifiId);
-        return total + (wifiService?.price || 0) * wifi.quantity;
-      }, 0);
-    }
-
-    // Baggage pricing
-    if (services.baggage) {
-      baggagePrice = services.baggage.reduce((total, bag) => {
-        const baggageService =
-          BAGGAGE_CATALOG[bag.baggageId] ||
-          Object.values(BAGGAGE_CATALOG).find((b) => b.id === bag.baggageId);
-        return total + (baggageService?.price || 0) * bag.pieces;
-      }, 0);
-    }
-
-    // Entertainment pricing
-    if (services.entertainment) {
-      entertainmentPrice = services.entertainment.reduce((total, ent) => {
-        const entertainmentService =
-          ENTERTAINMENT_CATALOG[ent.entertainmentId] ||
-          Object.values(ENTERTAINMENT_CATALOG).find(
-            (e) => e.id === ent.entertainmentId,
-          );
-        return total + (entertainmentService?.price || 0) * ent.quantity;
-      }, 0);
-    }
-
-    const totalServicesCents =
-      seatPrice + mealPrice + wifiPrice + baggagePrice + entertainmentPrice;
-    const taxesCents = Math.round(totalServicesCents * 0.08); // 8% tax
-    const totalCents = totalServicesCents + taxesCents;
-
-    const breakdown = [
-      ...(seatPrice > 0
-        ? [
-            {
-              label: "Seat Selection",
-              amount: seatPrice,
-              description: "Premium seat upgrade",
-            },
-          ]
-        : []),
-      ...(mealPrice > 0
-        ? [
-            {
-              label: "Meals",
-              amount: mealPrice,
-              description: "In-flight meals",
-            },
-          ]
-        : []),
-      ...(wifiPrice > 0
-        ? [
-            {
-              label: "WiFi",
-              amount: wifiPrice,
-              description: "Internet connectivity",
-            },
-          ]
-        : []),
-      ...(baggagePrice > 0
-        ? [
-            {
-              label: "Baggage",
-              amount: baggagePrice,
-              description: "Additional baggage",
-            },
-          ]
-        : []),
-      ...(entertainmentPrice > 0
-        ? [
-            {
-              label: "Entertainment",
-              amount: entertainmentPrice,
-              description: "Entertainment access",
-            },
-          ]
-        : []),
-      ...(taxesCents > 0
-        ? [
-            {
-              label: "Taxes & Fees",
-              amount: taxesCents,
-              description: "8% service tax",
-            },
-          ]
-        : []),
-    ];
-
-    return {
-      seatPrice,
-      mealPrice,
-      wifiPrice,
-      baggagePrice,
-      entertainmentPrice,
-      totalServicesCents,
-      subtotalWithBasesCents: totalServicesCents,
-      taxesCents,
-      totalCents,
-      currency,
-      breakdown,
-    };
-  }
-
-  /**
-   * Get all services for a booking
-   */
-  async getBookingServices(bookingId: string): Promise<InflightServiceOrder> {
-    const booking = await this.getBooking(bookingId);
-    const metadata = (booking as any).metadata ?? {};
-
-    return {
-      bookingId,
-      seat: metadata.seatNumber
-        ? {
-            seatNumber: metadata.seatNumber,
-            seatType: "economy",
-            price: 0,
-            selectedAt: new Date(),
-          }
-        : undefined,
-      meals: metadata.inflightServices?.meals || [],
-      wifi: metadata.inflightServices?.wifi || [],
-      baggage: metadata.inflightServices?.baggage || [],
-      entertainment: metadata.inflightServices?.entertainment || [],
-      totalServicesCents: 0,
-      createdAt: booking.createdAt,
-      updatedAt: booking.updatedAt,
-    };
-  }
-
-  /**
-   * Remove a service from a booking
-   */
-  async removeService(
-    bookingId: string,
-    serviceType: string,
-    serviceId: string,
-  ): Promise<void> {
-    const booking = await this.getBooking(bookingId);
-    const metadata = (booking as any).metadata ?? {};
-
-    if (!metadata.inflightServices) {
-      throw new BadRequestError("No services found for booking");
-    }
-
-    switch (serviceType) {
-      case "meal":
-        metadata.inflightServices.meals = (
-          metadata.inflightServices.meals || []
-        ).filter((m: any) => m.mealId !== serviceId);
-        break;
-      case "wifi":
-        metadata.inflightServices.wifi = (
-          metadata.inflightServices.wifi || []
-        ).filter((w: any) => w.wifiId !== serviceId);
-        break;
-      case "baggage":
-        metadata.inflightServices.baggage = (
-          metadata.inflightServices.baggage || []
-        ).filter((b: any) => b.baggageId !== serviceId);
-        break;
-      case "entertainment":
-        metadata.inflightServices.entertainment = (
-          metadata.inflightServices.entertainment || []
-        ).filter((e: any) => e.entertainmentId !== serviceId);
-        break;
-      default:
-        throw new BadRequestError(`Unknown service type: ${serviceType}`);
-    }
-
-    (booking as any).metadata = metadata;
-    await AppDataSource.getRepository(Booking).save(booking);
-    logger.info("Service removed from booking", {
-      bookingId,
-      serviceType,
-      serviceId,
-    });
-  }
-
-  /**
-   * Helper: Get booking or throw
-   */
-  private async getBooking(bookingId: string): Promise<Booking> {
-    const booking = await AppDataSource.getRepository(Booking).findOne({
-      where: { id: bookingId },
-    });
-    if (!booking) {
-      throw new NotFoundError("Booking not found");
-    }
-    return booking;
+  calculateServicePricing(services: InflightServiceItem[]): { totalCents: number; currency: string } {
+    const totalCents = services.reduce((sum, s) => sum + s.priceCents, 0);
+    return { totalCents, currency: "USD" };
   }
 }
 

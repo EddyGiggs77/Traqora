@@ -23,6 +23,8 @@ import {
 } from "lucide-react"
 
 import { SeatSelector } from "@/components/booking/seat-selector"
+import { SeatMap, Seat } from "@/components/booking/SeatMap"
+import { InFlightServices, InFlightServiceItem } from "@/components/booking/InFlightServices"
 import { AncillarySelector } from "@/components/booking/ancillary-selector"
 import { BookingSummary } from "@/components/booking/booking-summary"
 import { InsuranceSelector } from "@/components/booking/insurance-selector"
@@ -105,6 +107,14 @@ export default function BookFlightPage() {
 
   const [bookingId, setBookingId] = useState("")
   const [selectedCoverage, setSelectedCoverage] = useState<InsuranceCoverageType | null>(null)
+  const [selectedSeatObj, setSelectedSeatObj] = useState<Seat | null>(null)
+  const [selectedInflightServices, setSelectedInflightServices] = useState<InFlightServiceItem[]>([]);
+  const catalogServices: InFlightServiceItem[] = [
+    { id: "meal-1", name: "Vegetarian Gourmet Meal", category: "meal", dietaryTag: "vegetarian", priceCents: 2500, description: "Fresh seasonal vegetables with quinoa and herb dressing." },
+    { id: "meal-2", name: "Gluten-Free Chicken Breast", category: "meal", dietaryTag: "gluten_free", priceCents: 2800, description: "Grilled organic chicken with steamed asparagus." },
+    { id: "wifi-1", name: "High-Speed Flight WiFi Pass", category: "wifi", priceCents: 1500, description: "Unlimited streaming and browsing for the entire flight." },
+    { id: "bag-1", name: "Extra Checked Baggage (23kg)", category: "baggage", priceCents: 4500, description: "Additional checked bag allowance up to 23kg." },
+  ]
   const [selectedAncillaries, setSelectedAncillaries] = useState<AncillaryCatalogItem[]>([])
   const [isPurchasingAncillaries, setIsPurchasingAncillaries] = useState(false)
   const [insurancePolicy, setInsurancePolicy] = useState<InsurancePolicy | null>(null)
@@ -418,10 +428,27 @@ export default function BookFlightPage() {
 
             {currentStep === "seats" && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <SeatSelector 
-                  cabinClass={flight.class} 
-                  onSeatSelect={(seat) => selectSeat(seat.id, seat.price)}
-                  selectedSeatId={selectedSeat?.id}
+                <SeatMap
+                  flightId={String((flight as any).id || "1")}
+                  cabinClass={(flight.class || "economy").toLowerCase() as any}
+                  selectedSeatNumber={selectedSeatObj?.seatNumber}
+                  onSeatSelect={(seat) => {
+                    setSelectedSeatObj(seat);
+                    selectSeat(seat.seatNumber, seat.priceCents);
+                  }}
+                  displayCurrency={displayCurrency}
+                  rates={rates}
+                />
+                <InFlightServices
+                  services={catalogServices}
+                  selectedServiceIds={selectedInflightServices.map((s) => s.id)}
+                  onToggleService={(service) => {
+                    if (selectedInflightServices.some((s) => s.id === service.id)) {
+                      setSelectedInflightServices(selectedInflightServices.filter((s) => s.id !== service.id));
+                    } else {
+                      setSelectedInflightServices([...selectedInflightServices, service]);
+                    }
+                  }}
                   displayCurrency={displayCurrency}
                   rates={rates}
                 />
@@ -430,7 +457,7 @@ export default function BookFlightPage() {
                     <ArrowLeft className="mr-2 h-4 w-4" />
                     Back
                   </Button>
-                  <Button size="lg" onClick={nextStep} disabled={!selectedSeat}>
+                  <Button size="lg" onClick={nextStep} disabled={!selectedSeatObj}>
                     Continue
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
