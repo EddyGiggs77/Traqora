@@ -279,6 +279,28 @@ export class BookingOrchestrationService {
   private flightRepo = AppDataSource.getRepository(Flight);
   private passengerRepo = AppDataSource.getRepository(Passenger);
 
+  async bookSeatAndServices(bookingId: string, seatNumber?: string, services?: Array<{ type: string; option: string; quantity: number }>): Promise<Booking> {
+    const booking = await this.bookingRepo.findOne({ where: { id: bookingId }, relations: ["flight"] });
+    if (!booking) throw new BadRequestError("Booking not found");
+    if (seatNumber) {
+      const meta: Record<string, unknown> = (booking as any).metadata ?? {};
+      meta.seatNumber = seatNumber;
+      (booking as any).metadata = meta;
+    }
+    if (services && services.length > 0) {
+      const meta: Record<string, unknown> = (booking as any).metadata ?? {};
+      const existing: unknown[] = Array.isArray(meta.inflightServices) ? (meta.inflightServices as unknown[]) : [];
+      meta.inflightServices = [
+        ...existing,
+        ...services.map((s) => ({ ...s, addedAt: new Date().toISOString() })),
+      ];
+      (booking as any).metadata = meta;
+    }
+    await this.bookingRepo.save(booking);
+    logger.info("Seat and in-flight services updated for booking", { bookingId, seatNumber, serviceCount: services?.length });
+    return booking;
+  }
+
   async createBooking(params: {
     flightId: string;
     passenger: {
@@ -322,18 +344,13 @@ export class BookingOrchestrationService {
         token: config.contracts.token,
       });
 
-      const inflightServices = (params as any).inflightServices || [];
-      const seatSelectionPrice = (params as any).seatSelectionPrice || 0;
-      const servicePricing = inflightServicesService ? inflightServicesService.calculateServicePricing(inflightServices) : { totalCents: 0 };
-      const totalAmountCents = flight.priceCents + seatSelectionPrice + servicePricing.totalCents;
-
       const booking = this.bookingRepo.create({
         idempotencyKey: params.idempotencyKey,
         walletAddress: params.walletAddress ?? null,
         flight,
         passenger,
         status: "onchain_submitted",
-        amountCents: totalAmountCents,
+        amountCents: flight.priceCents,
         sorobanTxHash: result.txHash,
       });
 
