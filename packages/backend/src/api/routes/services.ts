@@ -160,6 +160,36 @@ router.post(
  * POST /api/services/seat
  * Select a seat for a booking (permanent booking)
  */
+/**
+ * POST /api/services/seat/select
+ * Select seat and add in-flight services to a booking
+ */
+router.post(
+  "/seat/select",
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const schema = z.object({
+      bookingId: z.string().uuid(),
+      seatNumber: z.string().regex(/^[0-9]{1,2}[A-F]$/),
+      services: z.array(z.object({
+        id: z.string(),
+        quantity: z.number().int().positive().optional()
+      })).optional()
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+    
+    const { BookingOrchestrationService } = await import("../../services/bookingOrchestrationService");
+    const orchestrationService = new BookingOrchestrationService();
+    const updated = await orchestrationService.selectSeatAndServices(
+      parsed.data.bookingId,
+      parsed.data.seatNumber,
+      parsed.data.services || []
+    );
+    return res.json({ booking: updated, message: "Seat and services successfully configured" });
+  })
+);
+
 router.post(
   "/seat",
   requireAuth,

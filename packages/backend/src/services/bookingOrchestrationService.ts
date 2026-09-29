@@ -279,6 +279,35 @@ export class BookingOrchestrationService {
   private flightRepo = AppDataSource.getRepository(Flight);
   private passengerRepo = AppDataSource.getRepository(Passenger);
 
+  async selectSeatAndServices(bookingId: string, seatNumber: string, services: Array<{ id: string; quantity?: number }>): Promise<Booking> {
+    const booking = await this.bookingRepo.findOne({
+      where: { id: bookingId },
+      relations: ["flight", "passenger"],
+    });
+    if (!booking) throw new BadRequestError("Booking not found");
+    if (!isBookingEditable(booking.status)) {
+      throw new BadRequestError("Booking is not in an editable state for seat/services selection");
+    }
+    let servicesTotal = 0;
+    const serviceCatalog: Record<string, number> = {
+      "meal-veg": 1500,
+      "meal-nonveg": 1800,
+      "meal-vegan": 1600,
+      "wifi-full": 2500,
+      "baggage-extra": 4000,
+      "seat-premium": 2000,
+    };
+    for (const s of services) {
+      const price = serviceCatalog[s.id] || 1000;
+      const qty = s.quantity || 1;
+      servicesTotal += price * qty;
+    }
+    booking.amountCents = (booking.flight.priceCents || 0) + servicesTotal;
+    await this.bookingRepo.save(booking);
+    logger.info("Seat and services updated for booking", { bookingId, seatNumber, servicesTotal });
+    return booking;
+  }
+
   async createBooking(params: {
     flightId: string;
     passenger: {
