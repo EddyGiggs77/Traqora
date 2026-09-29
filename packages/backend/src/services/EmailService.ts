@@ -144,6 +144,21 @@ export class EmailService {
     permissionLevel: string,
     message?: string,
   ): Promise<boolean> {
+    return this.send({
+      to: recipientEmail,
+      subject: `[Traqora] ${senderName} shared an itinerary with you`,
+      html: `<p>${senderName} has shared '${itineraryTitle}' with you (${permissionLevel} access).</p><p><a href="${invitationLink}">Accept Invitation</a></p>${message ? `<p>${message}</p>` : ""}`,
+    });
+  }
+
+  async sendShareInvitationOld(
+    recipientEmail: string,
+    senderName: string,
+    itineraryTitle: string,
+    invitationLink: string,
+    permissionLevel: string,
+    message?: string,
+  ): Promise<boolean> {
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #333;">You've been invited to collaborate!</h2>

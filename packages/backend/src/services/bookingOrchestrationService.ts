@@ -22,6 +22,7 @@ import type {
   SeasonalFareOverride,
 } from "./fareRulesService";
 import { getWebSocketServer } from "../websockets/server";
+import { itineraryShareService } from "./ItineraryShareService";
 
 // ── Booking cancel policy engine (#785) ────────────────────────────────────
 //
