@@ -5,7 +5,6 @@ import { asyncHandler } from '../../utils/errorHandler';
 import { disputeService } from '../../services/dispute/disputeService';
 import { EvidenceValidationError } from '../../services/dispute/evidenceValidation';
 
-const router = Router();
 
 const createDisputeSchema = z.object({
   refundId: z.string().uuid(),
@@ -37,10 +36,7 @@ const appealSchema = z.object({
   reason: z.string().min(20).max(2000),
 });
 
-const voteSchema = z.object({
-  phase: z.union([z.literal(1), z.literal(2)]),
-  vote: z.enum(['for', 'against', 'abstain']),
-});
+const router = Router();
 
 const getErrorMessage = (err: unknown): string =>
   err instanceof Error ? err.message : 'Unexpected dispute workflow error';
@@ -83,14 +79,6 @@ router.get(
 
     const items = await disputeService.listDisputesByAddress(walletAddress);
     return res.json({ items, total: items.length });
-  }),
-);
-
-router.post(
-  '/reminders',
-  asyncHandler(async (_req: Request, res: Response) => {
-    const count = await disputeService.checkDeadlinesAndSendReminders();
-    return res.json({ success: true, remindedCount: count });
   }),
 );
 
@@ -179,30 +167,6 @@ router.post(
         reason: parsed.data.reason,
       });
       return res.json(dispute);
-    } catch (err: unknown) {
-      return res.status(400).json({ error: getErrorMessage(err) });
-    }
-  }),
-);
-
-router.post(
-  '/:id/vote',
-  requireAuth,
-  asyncHandler(async (req: Request, res: Response) => {
-    const parsed = voteSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-
-    const walletAddress = req.user?.walletAddress;
-    if (!walletAddress) return res.status(401).json({ error: 'Wallet address required' });
-
-    try {
-      const result = await disputeService.castTwoPhaseVote({
-        disputeId: req.params.id,
-        voterAddress: walletAddress,
-        phase: parsed.data.phase,
-        vote: parsed.data.vote,
-      });
-      return res.json({ success: true, ...result });
     } catch (err: unknown) {
       return res.status(400).json({ error: getErrorMessage(err) });
     }
