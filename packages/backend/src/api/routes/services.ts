@@ -446,7 +446,19 @@ router.post(
       await inflightServicesService.getBookingServices(bookingId);
     const pricing = inflightServicesService.calculateServicePricing(services);
 
-    return res.json(pricing);
+    const booking = await AppDataSource.getRepository(Booking).findOne({
+      where: { id: bookingId },
+    });
+    const baseFareCents = booking ? booking.amountCents : 0;
+
+    return res.json({
+      bookingId,
+      baseFareCents,
+      servicesTotalCents: pricing.totalCents,
+      totalCents: baseFareCents + pricing.totalCents,
+      currency: pricing.currency || "USD",
+      breakdown: pricing.breakdown,
+    });
   }),
 );
 

@@ -1095,6 +1095,27 @@ export class BookingOrchestrationService {
     return nameChangeHistory.get(key) || [];
   }
 
+  async calculateBookingTotalWithServices(bookingId: string): Promise<{ baseFareCents: number; servicesCents: number; totalCents: number; currency: string }> {
+    const booking = await this.bookingRepo.findOne({
+      where: { id: bookingId },
+      relations: ["flight"],
+    });
+    if (!booking) {
+      throw new BadRequestError("Booking not found");
+    }
+    const inflightServicesService = (await import("./inflightServicesService")).inflightServicesService;
+    const services = await inflightServicesService.getBookingServices(bookingId);
+    const pricing = inflightServicesService.calculateServicePricing(services);
+    const baseFareCents = booking.amountCents;
+    const servicesCents = pricing.totalCents;
+    return {
+      baseFareCents,
+      servicesCents,
+      totalCents: baseFareCents + servicesCents,
+      currency: pricing.currency || "USD",
+    };
+  }
+
   private recordNameHistory(
     bookingId: string,
     passengerId: string,
